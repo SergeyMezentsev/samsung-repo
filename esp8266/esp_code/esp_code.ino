@@ -2,9 +2,9 @@
 #include <ESP8266WiFi.h> 
 #include <ESP8266WebServer.h>
 
-#define BTN_RESET_PIN 4   //Button for reset ESP8266 and delete old SSID and password
-#define BLUE_LED_PIN 5    //LED for checking state of Wi-fi communication
-#define RED_LED_PIN 123   //LED for checking presence of all childrens' modules
+#define BTN_RESET_PIN 4
+#define BLUE_LED_PIN 5
+#define RED_LED_PIN 123
 
 //-----------------------------------------------Web-server settings-----------------------------------------------
 /* SSID и пароль точки доступа esp8266*/
@@ -186,7 +186,7 @@ void getPhoneData()
     EEPROM.commit();         //Commit writing to EEPROM
   
    //Delay for 15 seconds
-   delay(3000);
+   delay(15000);
 
 
    //Reset the esp8266
@@ -224,10 +224,38 @@ void setup()
 
   if(params.getFlag)
   {
-    digitalWrite(BLUE_LED_PIN, HIGH);
     //If we have already data to connect to AP of the phone
     //We need to try to connect to it
-    
+
+    Serial.println("Connecting to ");
+    Serial.println(params.teacherSSID);
+
+    //const char* newSSID = params.teacherSSID;
+    //const char* newPass = params.teacherPass;
+
+    // подключиться к вашей локальной wi-fi сети
+    WiFi.begin(params.teacherSSID, params.teacherPass);
+
+    // проверить, подключился ли wi-fi модуль к wi-fi сети
+    while (WiFi.status() != WL_CONNECTED) 
+    {
+      digitalWrite(BLUE_LED_PIN, HIGH);
+      delay(500);
+      digitalWrite(BLUE_LED_PIN, LOW);
+      delay(500);
+      Serial.print(".");
+
+      if(digitalRead(BTN_RESET_PIN)== HIGH)
+      {
+        clearEEPROM();
+        restartESP();
+      }
+    }
+    digitalWrite(BLUE_LED_PIN, HIGH);
+    Serial.println("");
+    Serial.println("WiFi connected..!");
+    Serial.print("Got IP: ");  Serial.println(WiFi.localIP());
+
     
   }
   else
