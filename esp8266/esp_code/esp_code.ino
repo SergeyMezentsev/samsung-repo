@@ -1,6 +1,12 @@
+#include <EEPROM.h>
 #include <ESP8266WiFi.h> 
 #include <ESP8266WebServer.h>
 
+#define BTN_RESET_PIN 4   //Button for reset ESP8266 and delete old SSID and password
+#define BLUE_LED_PIN 5    //LED for checking state of Wi-fi communication
+#define RED_LED_PIN 123   //LED for checking presence of all childrens' modules
+
+//-----------------------------------------------Web-server settings-----------------------------------------------
 /* SSID и пароль точки доступа esp8266*/
 const char* ssidOfESP = "Teacher";  // SSID that esp8266 will generate
 const char* passwordOfESP = "12345678"; // password that esp8266 will generate
@@ -12,13 +18,43 @@ IPAddress subnet(255,255,255,0);
 
 // Объект веб-сервера. Будет прослушивать порт 80 (по умолчанию для HTTP)
 ESP8266WebServer server(80); 
+//-----------------------------------------------------------------------------------------------------------------
 
 
+//-----------------------------------------------Structure to collect phone params-----------------------------------------------
+struct TParams
+{
+  char teacherSSID[21];
+  char teacherPass[21];
+  int numberOfModules;
+  bool getFlag = false;
+} params, newParams;
+//-----------------------------------------------------------------------------------------------------------------
 
-//variables for data collecting
-String phoneSSID = "";
-String phonePass = "";
-bool getPararmsFlag = false;
+//-----------------------------------------------Clear EEPROM and RESET ESP8266-----------------------------------------------
+void clearEEPROM()
+{
+  struct TParams cleanParams;
+  for(int i = 0; i < 21; i++)
+  {
+    cleanParams.teacherSSID[i] = 0;
+    cleanParams.teacherPass[i] = 0;
+  }
+  cleanParams.numberOfModules = 0;
+  cleanParams.getFlag = false;
+
+  EEPROM.put(0, cleanParams);   // Put structure "params" on Zero Address
+  EEPROM.commit();              //Commit writing to EEPROM
+}
+
+void restartESP()
+{
+  Serial.println("Restarting ESP...");
+  ESP.restart();
+}
+//-----------------------------------------------------------------------------------------------------------------
+
+
 
 String startPageHTML = R"=====(
 <!DOCTYPE html>
@@ -50,8 +86,9 @@ String startPageHTML = R"=====(
     <center>
       <h1>Настройка параметров подключения</h1>
       <form action="params">
-      <p class="commonText">Имя сети: <input type="text" name="SSID" class="commonText"></p>
-      <p class="commonText">Пароль сети: <input type="text" name="pass" class="commonText"></p>
+      <p class="commonText">Имя сети: <input type="text" name="SSID" class="commonText" maxlength="20"></p>
+      <p class="commonText">Пароль сети: <input type="text" name="pass" class="commonText" maxlength="20"></p>
+      <p class="commonText">Число детских модулей: <input type="number" name="number" class="commonText"></p>
       <input type="submit" value="Отправить" class="button">
       </form>
     </center>
@@ -62,30 +99,60 @@ String startPageHTML = R"=====(
 
 void handleRoot()
 {
-server.send( 200, "text/html", startPageHTML);
+  server.send( 200, "text/html", startPageHTML);
+  
+  
+  //Здесь просто чтение EEPROM для отладки
+  //По факту структура newParams не нужна
+  EEPROM.get(0, newParams);   // прочитать из адреса 0
+
+  Serial.println("-----------------------");
+  Serial.print("newParams.teacherSSID: ");
+  Serial.println(newParams.teacherSSID);
+  Serial.print("newParams.teacherPass: ");
+  Serial.println(newParams.teacherPass);
+  Serial.print("newParams.numberOfModules: ");
+  Serial.println(newParams.numberOfModules);
+  Serial.print("newParams.getFlag: ");
+  Serial.println(newParams.getFlag);
+  Serial.println("-----------------------");
 }
 
 
 void getPhoneData()
 {
- 
+  byte counter = 0;
   for(int i = 0; i < server.args(); i++)
   {
     if(server.argName(i) == "SSID" && server.arg(i) != "")
     {
+      String phoneSSID = "";
       phoneSSID = server.arg(i);
-      getPararmsFlag= true;
-      Serial.print("SSID: "); Serial.println(phoneSSID);
+      phoneSSID.toCharArray(params.teacherSSID, 20);
+      counter++;
+      Serial.print("params.teacherSSID: "); Serial.println(params.teacherSSID);
     }
-    if(server.argName(i) == "pass" && server.arg(i) != "")
+    else if(server.argName(i) == "pass" && server.arg(i) != "")
     {
+      String phonePass = "";
       phonePass = server.arg(i);
-      getPararmsFlag= true;
-      Serial.print("Pass: "); Serial.println(phonePass);
+      phonePass.toCharArray(params.teacherPass, 20);
+      counter++;
+      Serial.print("params.teacherPass: "); Serial.println(params.teacherPass);
+    }
+    else if (server.argName(i) == "number" && server.arg(i) != "")
+    {
+      String numberModules = "";
+      numberModules = server.arg(i);
+      params.numberOfModules = numberModules.toInt();
+      counter++;
+      Serial.print("params.numberOfModules: "); Serial.println(params.numberOfModules);
     }
   }
 
-  if(getPararmsFlag)
+  if(counter > 2 && params.numberOfModules < 33) params.getFlag = true;
+
+  if(params.getFlag)
   {
     String lastPage = R"=====(
     <!DOCTYPE html>
@@ -96,12 +163,17 @@ void getPhoneData()
         <meta name="description" content="Samsung project page">
         <meta name="keywords" content="html, Samsung, test">
         <title>Завершение</title>
+        <style>
+          .commonText {
+            font-size: 25px;
+          }
+        </style>
       </head>
       <body style="background-color: #cccccc; Color: blue; ">
         <center>
           <br><br><br>
-          <h1>Параметры сети были успешно переданы</h1><br>
-          <h2>Модуль будет подключён через 15 секунд</h2>
+          <h1 class="commonText">Параметры сети были успешно переданы</h1><br>
+          <h2 class="commonText">Модуль будет подключён через 15 секунд</h2>
         </center>   
       </body>
     </html>
@@ -109,15 +181,16 @@ void getPhoneData()
     server.send(200, "text/html", lastPage);    // возвращаем HTTP-ответ
 
 
-    //Here we need save phoneSSID, phonePass and getParamFlag in EEprom
-
+    //Here we need save struct "params" to EEPROM
+    EEPROM.put(0, params);   // Put structure "params" on Zero Address
+    EEPROM.commit();         //Commit writing to EEPROM
   
    //Delay for 15 seconds
-   //delay(15000);
+   delay(3000);
 
 
    //Reset the esp8266
-
+   restartESP();
     
   }
   else
@@ -140,22 +213,64 @@ void handle_NotFound()
 void setup() 
 {
   Serial.begin(115200);
+  EEPROM.begin(100);      //Start EEPROM
+
+  pinMode(BTN_RESET_PIN, INPUT);
+  pinMode(BLUE_LED_PIN, OUTPUT);
+  digitalWrite(BLUE_LED_PIN, LOW);
   delay(100);
 
-  WiFi.softAP(ssidOfESP, passwordOfESP);
-  WiFi.softAPConfig(local_ip, gateway, subnet);
-  delay(100);
+  EEPROM.get(0, params);  
 
-  server.on("/params", getPhoneData);            // привязать функцию обработчика к URL-пути
-  server.on("/", handleRoot);
-  server.onNotFound(handle_NotFound);
+  if(params.getFlag)
+  {
+    digitalWrite(BLUE_LED_PIN, HIGH);
+    //If we have already data to connect to AP of the phone
+    //We need to try to connect to it
+    
+    
+  }
+  else
+  {
+    //If we don't have any data for AP of the phone
+    //We need to start Web-server
+    
+    WiFi.softAP(ssidOfESP, passwordOfESP);
+    WiFi.softAPConfig(local_ip, gateway, subnet);
+    delay(100);
   
-  server.begin();                                // запуск сервера
-  Serial.println("HTTP server started");
+    server.on("/params", getPhoneData);            // привязать функцию обработчика к URL-пути
+    server.on("/", handleRoot);
+    server.onNotFound(handle_NotFound);
+    
+    server.begin();                                // запуск сервера
+    Serial.println("HTTP server started");
+  }
 }
 
 void loop() 
 {
-  server.handleClient();    // обработка входящих запросов
+  if(params.getFlag)
+  {
+    //If we have already data to connect to AP of the phone
+    //We need to try to connect to it
 
+    Serial.println("Works!!!");
+    delay(1000);
+
+    
+    if(digitalRead(BTN_RESET_PIN)== HIGH)
+    {
+      clearEEPROM();
+      restartESP();
+    }
+    
+  }
+  else
+  {
+    //If we don't have any data for AP of the phone
+    //We need to start Web-server
+    server.handleClient();    // обработка входящих запросов
+  }
+ 
 }
