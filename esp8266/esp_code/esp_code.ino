@@ -1,10 +1,11 @@
 #include <EEPROM.h>
 #include <ESP8266WiFi.h> 
 #include <ESP8266WebServer.h>
+#include "PubSubClient.h"
 
 #define BTN_RESET_PIN 4
 #define BLUE_LED_PIN 5
-#define RED_LED_PIN 123
+#define MODULES_PRESENSE_PIN 12
 
 //-----------------------------------------------Web-server settings-----------------------------------------------
 /* SSID и пароль точки доступа esp8266*/
@@ -20,6 +21,38 @@ IPAddress subnet(255,255,255,0);
 ESP8266WebServer server(80); 
 //-----------------------------------------------------------------------------------------------------------------
 
+//-----------------------------------------------MQTT-client settings----------------------------------------------
+const char* mqtt_server = "dev.rightech.io";
+String clientId = "teacher_test";
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+//set time period that is used to send data to the MQTT broker
+int sendPeriod = 2000;
+unsigned long lastSend = 0;
+
+//This function allows us to wait until we're connected
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    if (client.connect(clientId.c_str())) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      //client.publish("sensors", "hello world");
+      // ... and resubscribe
+      //client.subscribe("inTopic");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+//-----------------------------------------------------------------------------------------------------------------
 
 //-----------------------------------------------Structure to collect phone params-----------------------------------------------
 struct TParams
@@ -97,6 +130,7 @@ String startPageHTML = R"=====(
 )=====";
 
 
+//Send main html page to the server
 void handleRoot()
 {
   server.send( 200, "text/html", startPageHTML);
@@ -118,7 +152,7 @@ void handleRoot()
   Serial.println("-----------------------");
 }
 
-
+//Allows to collect data sent from the server
 void getPhoneData()
 {
   byte counter = 0;
@@ -199,12 +233,13 @@ void getPhoneData()
   }
 }
 
-
+//This function allows to show absence of the page for the request
 void handle_NotFound()
 {
   server.send(404, "text/plain", "Not found");
 }
 
+//--------------------------------------------------------------------------------------------------------
 
 
 
@@ -218,6 +253,7 @@ void setup()
   pinMode(BTN_RESET_PIN, INPUT);
   pinMode(BLUE_LED_PIN, OUTPUT);
   digitalWrite(BLUE_LED_PIN, LOW);
+  pinMode(MODULES_PRESENSE_PIN, INPUT);
   delay(100);
 
   EEPROM.get(0, params);  
@@ -226,12 +262,10 @@ void setup()
   {
     //If we have already data to connect to AP of the phone
     //We need to try to connect to it
-
+    
+    //-----------------------------------------Connecting to local Wi-fi--------------------------------------
     Serial.println("Connecting to ");
     Serial.println(params.teacherSSID);
-
-    //const char* newSSID = params.teacherSSID;
-    //const char* newPass = params.teacherPass;
 
     // подключиться к вашей локальной wi-fi сети
     WiFi.begin(params.teacherSSID, params.teacherPass);
@@ -255,8 +289,11 @@ void setup()
     Serial.println("");
     Serial.println("WiFi connected..!");
     Serial.print("Got IP: ");  Serial.println(WiFi.localIP());
-
+    //--------------------------------------------------------------------------------------------------------
     
+    //-----------------------------------------Connecting to the MQTT-server----------------------------------
+    client.setServer(mqtt_server, 1883);
+    //--------------------------------------------------------------------------------------------------------
   }
   else
   {
@@ -283,10 +320,33 @@ void loop()
     //If we have already data to connect to AP of the phone
     //We need to try to connect to it
 
-    Serial.println("Works!!!");
-    delay(1000);
+    if (!client.connected())
+    {
+      reconnect();
+    }
+    client.loop();
 
-    
+    if(millis() - lastSend > sendPeriod)
+    {
+      client.publish("pos.lat", "50");
+      client.publish("pos.lon", "60");
+      //Check for presence_signal
+      if(digitalRead(MODULES_PRESENSE_PIN) == HIGH)
+      {
+        Serial.println("true");
+        client.publish("modules", "true");
+      }
+      else
+      {
+        Serial.println("false");
+        client.publish("modules", "false");
+      }
+      
+      lastSend = millis();
+    }
+
+
+    //Check if we need to restart ESP
     if(digitalRead(BTN_RESET_PIN)== HIGH)
     {
       clearEEPROM();
