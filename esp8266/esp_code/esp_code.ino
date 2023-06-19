@@ -1,3 +1,5 @@
+#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h> 
 #include <ESP8266WebServer.h>
@@ -5,7 +7,7 @@
 
 #define BTN_RESET_PIN 4
 #define BLUE_LED_PIN 5
-#define MODULES_PRESENSE_PIN 12
+#define MODULES_PRESENSE_PIN 14
 
 //-----------------------------------------------Web-server settings-----------------------------------------------
 /* SSID и пароль точки доступа esp8266*/
@@ -52,6 +54,57 @@ void reconnect() {
     }
   }
 }
+//-----------------------------------------------------------------------------------------------------------------
+
+//-----------------------------------------------GPS-module settings-----------------------------------------------
+
+static const int RXPin = 12, TXPin = 13;    //So, we need 12-->(TX_OF_GPS_MODULE) and 13 --> (RX_OF_GPS_MODULE)
+static const uint32_t GPSBaud = 9600;
+
+// The TinyGPS++ object
+TinyGPSPlus gps;
+
+// The serial connection to the GPS device
+SoftwareSerial ss(RXPin, TXPin);
+
+//This function allows us to wait for GPS data trancieving and collest the data into the "gps" object
+static void waitForGPSResponse(unsigned long ms)
+{
+  unsigned long start = millis();
+  do 
+  {
+    while (ss.available())
+      gps.encode(ss.read());
+  } while (millis() - start < ms);
+}
+
+//Smart function that allows to publish coordinates only when they are available
+void smartSendCoordinates()
+{
+  //Wait for GPS data, collect them
+  waitForGPSResponse(2000);
+
+  //Send data using MQTT-Client API
+  if(gps.location.isValid())
+  {
+    String strLat(gps.location.lat(), 6);
+    String strLon(gps.location.lng(), 6);
+    
+    Serial.print("Latitude and longitude: \t\t\t");
+    Serial.print(strLat); Serial.print(" / "); Serial.println(strLon);
+
+    client.publish("pos.lat", strLat.c_str());
+    client.publish("pos.lon", strLon.c_str());
+  }
+  else
+  {
+    Serial.print("\nInvalid data from GPS-module\n");
+  }
+}
+
+
+
+
 //-----------------------------------------------------------------------------------------------------------------
 
 //-----------------------------------------------Structure to collect phone params-----------------------------------------------
@@ -294,6 +347,11 @@ void setup()
     //-----------------------------------------Connecting to the MQTT-server----------------------------------
     client.setServer(mqtt_server, 1883);
     //--------------------------------------------------------------------------------------------------------
+
+    //--------------------------------------Create an object of the GPS-module--------------------------------
+    ss.begin(GPSBaud);
+    //--------------------------------------------------------------------------------------------------------
+
   }
   else
   {
@@ -328,8 +386,9 @@ void loop()
 
     if(millis() - lastSend > sendPeriod)
     {
-      client.publish("pos.lat", "50");
-      client.publish("pos.lon", "60");
+      //Send coordinates to 
+      smartSendCoordinates();
+      
       //Check for presence_signal
       if(digitalRead(MODULES_PRESENSE_PIN) == HIGH)
       {
