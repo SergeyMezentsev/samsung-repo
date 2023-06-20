@@ -1,3 +1,4 @@
+#include "GBUSmini.h"  // мини-библиотека с лёгкими функциями
 #include <TinyGPS++.h>
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
@@ -292,11 +293,8 @@ void handle_NotFound()
   server.send(404, "text/plain", "Not found");
 }
 
-//--------------------------------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------------------------------------------------------------
 
-
-
-  
 
 void setup() 
 {
@@ -315,6 +313,14 @@ void setup()
   {
     //If we have already data to connect to AP of the phone
     //We need to try to connect to it
+
+    //-----------------------------------------Send number of modules--------------------------------------
+    pinMode(MODULES_PRESENSE_PIN, INPUT_PULLUP);
+    byte dataToSend[1] = {params.numberOfModules};
+    delay(2500);
+    GBUS_send(MODULES_PRESENSE_PIN, 3, 5, dataToSend, sizeof(dataToSend));
+    delay(2500);
+    pinMode(MODULES_PRESENSE_PIN, INPUT);
     
     //-----------------------------------------Connecting to local Wi-fi--------------------------------------
     Serial.println("Connecting to ");
